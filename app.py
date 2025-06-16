@@ -21,13 +21,23 @@ async def read_form(request: Request):
 @app.post("/", response_class=HTMLResponse)
 async def handle_form(request: Request, phrase: str = Form(...)):
     prediction = classifier(phrase)[0]
-    label = prediction["label"].lower()  # Already "positive", "neutral", or "negative"
+    label = prediction["label"]
     score = prediction["score"]
+
+    # Map model labels to human-friendly strings
+    label_map = {
+        "LABEL_0": "negative",
+        "LABEL_1": "neutral",
+        "LABEL_2": "positive"
+    }
+
+    result = label_map.get(label.upper(), label)  # Fallback to raw label
     score_percent = f"{score * 100:.1f}%"
 
     return templates.TemplateResponse("index.html", {
         "request": request,
-        "result": label,
+        "result": result,
         "phrase": phrase,
         "score": score_percent
     })
+

@@ -1,29 +1,61 @@
 # app.py
 import datetime as dt
 from flask import Flask, request, render_template
+import praw
+import yfinance as yf
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from asgiref.wsgi import WsgiToAsgi
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 app = Flask(__name__)
 analyzer = SentimentIntensityAnalyzer()
 
-# === Test data simulating sentiment scores ===
-TEST_DATA = {
-    'TSLA': {'posts': [0.3, 0.1, -0.1], 'comments': [0.2, -0.05, 0.0, 0.5]},
-    'AAPL': {'posts': [0.0, 0.05], 'comments': [-0.1, 0.0, 0.1]},
-    # Add more tickers here if needed
-}
+# === Hard‑coded Reddit credentials ===
+reddit = praw.Reddit(
+    client_id=os.getenv("REDDIT_CLIENT_ID"),
+    client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
+    user_agent=os.getenv("REDDIT_USER_AGENT")
+)
+
+assert reddit.read_only
 
 def analyze_ticker(ticker, hours):
-    data = TEST_DATA.get(ticker, {'posts': [], 'comments': []})
-    def summarize(lst):
+    since = dt.datetime.utcnow() - dt.timedelta(hours=hours)
+    posts, comments = [], []
+
+    for submission in reddit.subreddit("all").search(f"title:{ticker}", sort="new", limit=200):
+        created = dt.datetime.utcfromtimestamp(submission.created_utc)
+        if created < since: continue
+        posts.append(analyzer.polarity_scores(submission.title)["compound"])
+        submission.comments.replace_more(limit=0)
+        for c in submission.comments:
+            if dt.datetime.utcfromtimestamp(c.created_utc) >= since:
+                comments.append(analyzer.polarity_scores(c.body)["compound"])
+
+    def summarize(scores):
         return {
-            "count": len(lst),
-            "mean": sum(lst) / len(lst) if lst else 0.0,
-            "pos": sum(1 for s in lst if s > 0.05),
-            "neu": sum(1 for s in lst if -0.05 <= s <= 0.05),
-            "neg": sum(1 for s in lst if s < -0.05),
+            "count": len(scores),
+            "mean": sum(scores)/len(scores) if scores else 0.0,
+            "pos": sum(1 for s in scores if s > 0.05),
+            "neu": sum(1 for s in scores if -0.05 <= s <= 0.05),
+            "neg": sum(1 for s in scores if s < -0.05),
         }
-    return summarize(data['posts']), summarize(data['comments'])
+
+    ps = summarize(posts)
+    cs = summarize(comments)
+    rec = "Yes" if ps["mean"] >= 0.1 and ps["count"] >= 3 else "No"
+
+    # → NEW: price change using yfinance
+    info = yf.Ticker(ticker).history(period="2d")
+    change = 0.0
+    if len(info) >= 2:
+        change = (info['Close'][-1] / info['Close'][-2] - 1) * 100
+
+    return ps, cs, rec, round(change, 2)
 
 @app.route("/", methods=["GET", "POST"])
 def home():
@@ -31,17 +63,14 @@ def home():
     hours = request.form.get("hours", 8, type=int)
     tickers_input = request.form.get("tickers", "").upper()
     if tickers_input:
-        # Split input by commas or newlines, strip whitespace
-        raw_list = tickers_input.replace(',', '\n').splitlines()
-        tickers = [t.strip() for t in raw_list if t.strip()]
+        raw = tickers_input.replace(",", "\n").splitlines()
+        tickers = [t.strip() for t in raw if t.strip()]
         results = {}
         for t in tickers:
-            ps, cs = analyze_ticker(t, hours)
-            results[t] = {"posts": ps, "comments": cs}
+            ps, cs, rec, pct = analyze_ticker(t, hours)
+            results[t] = {"posts": ps, "comments": cs, "recommend": rec, "change": pct}
     return render_template("index.html", results=results, hours=hours)
 
-# Wrap WSGI app for ASGI compatibility
-from asgiref.wsgi import WsgiToAsgi
 wsgi_app = WsgiToAsgi(app)
 
 if __name__ == "__main__":

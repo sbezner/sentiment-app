@@ -1,15 +1,43 @@
-<!DOCTYPE html>
-<html>
-<head><title>Sentiment Checker</title></head>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Reddit Sentiment Scanner (Test)</title>
+</head>
 <body>
-  <h1>Enter a Phrase</h1>
+  <h1>Reddit Sentiment Scanner (Using Test Data)</h1>
   <form method="post">
-    <input type="text" name="phrase" required>
-    <button type="submit">Check Sentiment</button>
+    <label>Tickers (CSV or one per line):</label><br>
+    <textarea name="tickers" rows="5" cols="50" placeholder="e.g.&#10;TSLA, AAPL, AMD&#10;GOOG"></textarea><br><br>
+
+    <label>Hours back:</label>
+    <input type="number" name="hours" min="1" max="168" value="{{ hours }}"><br><br>
+
+    <button type="submit">Analyze</button>
   </form>
-  {% if result %}
-    <p>Sentiment: <strong>{{ result }}</strong> ({{ phrase }})</p>
-    <p>Confidence Score: <strong>{{ score }}</strong></p>
+
+  {% if results %}
+    <h2>Results (last {{ hours }} hours)</h2>
+    <table border="1" cellpadding="6">
+      <tr>
+        <th>Ticker</th>
+        <th>Posts (count, mean, +/n/-)</th>
+        <th>Comments (count, mean, +/n/-)</th>
+      </tr>
+      {% for t, data in results.items() %}
+      <tr>
+        <td>{{ t }}</td>
+        <td>
+          {{ data.posts.count }}, mean {{ data.posts.mean|round(2) }}, +
+          {{ data.posts.pos }}/n{{ data.posts.neu }}/-{{ data.posts.neg }}
+        </td>
+        <td>
+          {{ data.comments.count }}, mean {{ data.comments.mean|round(2) }}, +
+          {{ data.comments.pos }}/n{{ data.comments.neu }}/-{{ data.comments.neg }}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
   {% endif %}
 </body>
 </html>

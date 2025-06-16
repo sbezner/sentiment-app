@@ -1,43 +1,48 @@
-from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
-import torch
+# app.py
+import datetime as dt
+from flask import Flask, request, render_template
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
-app = FastAPI()
-templates = Jinja2Templates(directory="templates")
+app = Flask(__name__)
+analyzer = SentimentIntensityAnalyzer()
 
-# Load the smaller 3-class model
-model_name = "cardiffnlp/twitter-roberta-base-sentiment"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForSequenceClassification.from_pretrained(model_name)
+# === Test data simulating sentiment scores ===
+TEST_DATA = {
+    'TSLA': {'posts': [0.3, 0.1, -0.1], 'comments': [0.2, -0.05, 0.0, 0.5]},
+    'AAPL': {'posts': [0.0, 0.05], 'comments': [-0.1, 0.0, 0.1]},
+    # Add more tickers here if needed
+}
 
-classifier = pipeline("sentiment-analysis", model=model, tokenizer=tokenizer)
+def analyze_ticker(ticker, hours):
+    data = TEST_DATA.get(ticker, {'posts': [], 'comments': []})
+    def summarize(lst):
+        return {
+            "count": len(lst),
+            "mean": sum(lst) / len(lst) if lst else 0.0,
+            "pos": sum(1 for s in lst if s > 0.05),
+            "neu": sum(1 for s in lst if -0.05 <= s <= 0.05),
+            "neg": sum(1 for s in lst if s < -0.05),
+        }
+    return summarize(data['posts']), summarize(data['comments'])
 
-@app.get("/", response_class=HTMLResponse)
-async def read_form(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "result": None})
+@app.route("/", methods=["GET", "POST"])
+def home():
+    results = None
+    hours = request.form.get("hours", 8, type=int)
+    tickers_input = request.form.get("tickers", "").upper()
+    if tickers_input:
+        # Split input by commas or newlines, strip whitespace
+        raw_list = tickers_input.replace(',', '\n').splitlines()
+        tickers = [t.strip() for t in raw_list if t.strip()]
+        results = {}
+        for t in tickers:
+            ps, cs = analyze_ticker(t, hours)
+            results[t] = {"posts": ps, "comments": cs}
+    return render_template("index.html", results=results, hours=hours)
 
-@app.post("/", response_class=HTMLResponse)
-async def handle_form(request: Request, phrase: str = Form(...)):
-    prediction = classifier(phrase)[0]
-    label = prediction["label"]
-    score = prediction["score"]
+# Wrap WSGI app for ASGI compatibility
+from asgiref.wsgi import WsgiToAsgi
+wsgi_app = WsgiToAsgi(app)
 
-    # Map model labels to human-friendly strings
-    label_map = {
-        "LABEL_0": "negative",
-        "LABEL_1": "neutral",
-        "LABEL_2": "positive"
-    }
-
-    result = label_map.get(label.upper(), label)  # Fallback to raw label
-    score_percent = f"{score * 100:.1f}%"
-
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "result": result,
-        "phrase": phrase,
-        "score": score_percent
-    })
-
+if __name__ == "__main__":
+    app.run(debug=True)

@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head><title>Sentiment Checker</title></head>
+<body>
+  <h1>Enter a Phrase</h1>
+  <form method="post">
+    <input type="text" name="phrase" required>
+    <button type="submit">Check Sentiment</button>
+  </form>
+  {% if result %}
+    <p>Sentiment: <strong>{{ result }}</strong> ({{ phrase }})</p>
+    <p>Confidence Score: <strong>{{ score }}</strong></p>
+  {% endif %}
+</body>
+</html>

@@ -1,4 +1,3 @@
-# app.py
 import datetime as dt
 from flask import Flask, request, render_template
 import praw
@@ -10,11 +9,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
 app = Flask(__name__)
 analyzer = SentimentIntensityAnalyzer()
 
-# === Hard‑coded Reddit credentials ===
 reddit = praw.Reddit(
     client_id=os.getenv("REDDIT_CLIENT_ID"),
     client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
@@ -49,7 +46,6 @@ def analyze_ticker(ticker, hours):
     cs = summarize(comments)
     rec = "Yes" if ps["mean"] >= 0.1 and ps["count"] >= 3 else "No"
 
-    # → NEW: price change using yfinance
     info = yf.Ticker(ticker).history(period="2d")
     change = 0.0
     if len(info) >= 2:
@@ -65,10 +61,27 @@ def home():
     if tickers_input:
         raw = tickers_input.replace(",", "\n").splitlines()
         tickers = [t.strip() for t in raw if t.strip()]
-        results = {}
+        temp_results = []
+
         for t in tickers:
             ps, cs, rec, pct = analyze_ticker(t, hours)
-            results[t] = {"posts": ps, "comments": cs, "recommend": rec, "change": pct}
+            score = ps["mean"] * ps["count"] + pct
+            temp_results.append((t, {
+                "posts": ps,
+                "comments": cs,
+                "recommend": rec,
+                "change": pct,
+                "score": score
+            }))
+
+        # Sort and attach rank
+        temp_results.sort(key=lambda x: x[1]["score"], reverse=True)
+        results = []
+        for rank, (t, data) in enumerate(temp_results, start=1):
+            data["rank"] = rank
+            data["ticker"] = t
+            results.append(data)
+
     return render_template("index.html", results=results, hours=hours)
 
 wsgi_app = WsgiToAsgi(app)
